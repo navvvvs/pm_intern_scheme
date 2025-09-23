@@ -1,0 +1,11 @@
+﻿CandidateID,Name,Education,Skills,PreferredDomain,Location
+CAND001,Aarav,B.Tech CSE (2nd Year),"Python, Machine Learning, Pandas",Data Science,Delhi
+CAND002,Meera,BBA (Final Year),"SEO, Social Media, Content Writing",Digital Marketing,Mumbai
+CAND003,Rohan,B.Tech IT (3rd Year),"Java, Kotlin, Android Studio",App Development,Hyderabad
+CAND004,Priya,BA English,"English Writing, Research, SEO",Content Writing,Remote
+CAND005,Arjun,B.Tech ECE (4th Year),"C++, Arduino, IoT, Robotics",Robotics,Noida
+CAND006,Kavya,B.Com,"MS Excel, Accounting, Statistics",Finance,Kolkata
+CAND007,Dev,B.Tech CSE (1st Year),"HTML, CSS, JavaScript, Python",Web Development,Delhi
+CAND008,Ananya,MBA (Marketing),"Marketing Strategy, SEO, Analytics",Digital Marketing,Bangalore
+CAND009,Varun,B.Tech Cybersecurity,"Networking, Ethical Hacking, Linux",Cybersecurity,Chennai
+CAND010,Isha,B.Des (Design),"Photoshop, Illustrator, Figma",Graphic Design,Pune
