@@ -1,68 +1,50 @@
-import pandas as pd
+# recommender.py
 import re
+import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-# ---------- Helpers ----------
-def preprocess_skills(skills_str):
-    """Split skills on comma or semicolon, lowercase and strip"""
-    skills = re.split(r'[;,]', str(skills_str))
+# ---------- Utility ----------
+def preprocess_skills(skills_str_or_list):
+    """Convert skills string/list into normalized list of lowercase words."""
+    if isinstance(skills_str_or_list, list):
+        skills = skills_str_or_list
+    else:
+        skills = re.split(r"[;,|\n]", str(skills_str_or_list))
     return [s.strip().lower() for s in skills if s.strip()]
 
-def calculate_score(candidate, internship):
-    """Compute weighted score based on skills + location"""
-    # --- Skills similarity ---
-    cand_skills = preprocess_skills(candidate['Skills'])
-    int_skills = preprocess_skills(internship['skills_required'])
+def calculate_score(user_skills, internship_skills, user_location, internship_location):
+    """Calculate weighted score (80% skills + 20% location)."""
+    cand_skills = preprocess_skills(user_skills)
+    int_skills = preprocess_skills(internship_skills)
 
-    skill_texts = [" ".join(cand_skills), " ".join(int_skills)]
-    vectorizer = TfidfVectorizer()
-    tfidf = vectorizer.fit_transform(skill_texts)
-    skill_similarity = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+    # Skills similarity
+    if not cand_skills or not int_skills:
+        skill_similarity = 0
+    else:
+        vectorizer = TfidfVectorizer()
+        tfidf = vectorizer.fit_transform([" ".join(cand_skills), " ".join(int_skills)])
+        skill_similarity = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
 
-    # --- Location similarity (substring check) ---
-    cand_loc = str(candidate['Location']).lower()
-    int_loc = str(internship['location']).lower()
-    location_similarity = 1 if cand_loc in int_loc else 0
+    # Location similarity (exact match / substring match)
+    cand_loc = str(user_location).lower().strip()
+    int_loc = str(internship_location).lower().strip()
+    location_similarity = 1 if cand_loc and cand_loc in int_loc else 0
 
-    # --- Final weighted score ---
-    final_score = (0.8 * skill_similarity) + (0.2 * location_similarity)
-    return round(final_score * 100, 2)  # return as percentage
+    # Weighted final score
+    return round((0.8 * skill_similarity + 0.2 * location_similarity) * 100, 2)
 
-def recommend_internships(candidate_id, candidates_df, internships_df, top_n=5):
-    """Recommend internships for a given candidate"""
-    candidate = candidates_df[candidates_df['CandidateID'] == candidate_id].iloc[0]
-
+def recommend_internships(skills, location_pref, internships: pd.DataFrame, top_n=3):
+    """Return top N internship recommendations."""
     recommendations = []
-    for _, internship in internships_df.iterrows():
-        score = calculate_score(candidate, internship)
+    for _, row in internships.iterrows():
+        score = calculate_score(skills, row["skills_required"], location_pref, row["location"])
         recommendations.append({
-            "InternshipID": internship['internship_id'],
-            "Company": internship['company'],
-            "Title": internship['title'],
-            "Location": internship['location'],
-            "Duration": internship['duration'],
-            "Stipend": internship['stipend'],
-            "Match Score": f"{score}%"
+            "Company": row["company"],
+            "Title": row["title"],
+            "Location": row["location"],
+            "Duration": row["duration"],
+            "Stipend": row["stipend"],
+            "Match Score": score
         })
-
-    # Sort by match score
-    recommendations = sorted(recommendations, key=lambda x: float(x["Match Score"][:-1]), reverse=True)
-
-    return recommendations[:top_n]
-
-
-# ---------- Run Test ----------
-if __name__ == "__main__":
-    # Load CSVs
-    candidates_df = pd.read_csv("candidates.csv")
-    internships_df = pd.read_csv("internships.csv")
-
-    # Example: Recommend for Aarav (CAND001)
-    recs = recommend_internships("CAND001", candidates_df, internships_df, top_n=5)
-
-    print(f"\nTop recommendations for {candidates_df.loc[0, 'Name']} ({candidates_df.loc[0, 'Location']}):\n")
-    for r in recs:
-        print(f"🏢 {r['Company']} | 💼 {r['Title']} | 📍 {r['Location']} | "
-              f"⏳ {r['Duration']} | 💰 {r['Stipend']} | ✅ Match Score: {r['Match Score']}")
-
+    return sorted(recommendations, key=lambda x: x["Match Score"], reverse=True)[:top_n]

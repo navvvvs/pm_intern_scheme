@@ -1,65 +1,98 @@
+# app.py
+import os
+import json
+import re
 import streamlit as st
 import pandas as pd
-import re
+import pdfplumber
+from io import BytesIO
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+import google.generativeai as genai
+
+# ---------- Configure Gemini ----------
+genai.configure(api_key=os.getenv("AIzaSyCQ8h1NWy67h_c3af2kdovQ7JR-2osM2VA", ""))
+MODEL = genai.GenerativeModel("gemini-pro")
 
 # ---------- Load Data ----------
 internships = pd.read_csv("data/internships.csv")
 
+st.set_page_config(page_title="AI Internship Recommender", layout="centered")
 st.title("AI-Based Internship Recommendation System")
 st.write("Prototype for Smart India Hackathon 2025")
 
-# ---------- User Input ----------
-st.subheader("Enter Your Details")
-
-name = st.text_input("Name")
-education = st.text_input("Education (e.g., B.Tech CSE, MBA, etc.)")
-skills = st.text_area("Skills (comma-separated, e.g., Python, Machine Learning, Pandas)")
-preferred_domain = st.text_input("Preferred Domain (e.g., Data Science, Web Development)")
-location_pref = st.text_input("Preferred Location (optional)")
-
-
 # ---------- Helpers ----------
-def preprocess_skills(skills_str):
-    """Split skills on comma/semicolon, lowercase, and strip spaces."""
-    skills = re.split(r"[;,]", str(skills_str))
+def extract_text_from_pdf(file_bytes: bytes) -> str:
+    text = ""
+    with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text
+
+def safe_parse_json(text: str):
+    try:
+        return json.loads(text)
+    except:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1:
+            try:
+                return json.loads(text[start:end+1])
+            except:
+                pass
+    return None
+
+def call_llm_extract_resume(resume_text: str) -> dict:
+    prompt = f"""
+    Extract the following from resume text and return JSON only:
+    - Name
+    - Age
+    - Education
+    - Skills (as a list)
+    - Location
+
+    Resume Text:
+    {resume_text}
+    """
+    try:
+        response = MODEL.generate_content(prompt)
+        parsed = safe_parse_json(response.text)
+        if parsed:
+            return parsed
+    except:
+        pass
+    return {"Name": None, "Age": None, "Education": None, "Skills": [], "Location": None}
+
+def preprocess_skills(skills_str_or_list):
+    if isinstance(skills_str_or_list, list):
+        skills = skills_str_or_list
+    else:
+        skills = re.split(r"[;,|\n]", str(skills_str_or_list))
     return [s.strip().lower() for s in skills if s.strip()]
 
-
 def calculate_score(user_skills, internship_skills, user_location, internship_location):
-    """Compute weighted score based on skills + location"""
-
-    # --- Skills similarity ---
     cand_skills = preprocess_skills(user_skills)
     int_skills = preprocess_skills(internship_skills)
 
-    skill_texts = [" ".join(cand_skills), " ".join(int_skills)]
-    vectorizer = TfidfVectorizer()
-    tfidf = vectorizer.fit_transform(skill_texts)
-    skill_similarity = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
+    if not cand_skills or not int_skills:
+        skill_similarity = 0
+    else:
+        vectorizer = TfidfVectorizer()
+        tfidf = vectorizer.fit_transform([" ".join(cand_skills), " ".join(int_skills)])
+        skill_similarity = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
 
-    # --- Location similarity ---
     cand_loc = str(user_location).lower().strip()
     int_loc = str(internship_location).lower().strip()
     location_similarity = 1 if cand_loc and cand_loc in int_loc else 0
 
-    # --- Final weighted score ---
-    final_score = (0.8 * skill_similarity) + (0.2 * location_similarity)
-    return round(final_score * 100, 2)  # percentage
+    return round((0.8 * skill_similarity + 0.2 * location_similarity) * 100, 2)
 
-
-def recommend_internships(user_skills, user_location, top_n=3):
-    """Recommend internships for given user"""
+def recommend_internships(skills, location_pref, top_n=3):
     recommendations = []
-
     for _, row in internships.iterrows():
-        score = calculate_score(
-            user_skills,
-            row["skills_required"],
-            user_location,
-            row["location"]
-        )
+        score = calculate_score(skills, row["skills_required"], location_pref, row["location"])
         recommendations.append({
             "Company": row["company"],
             "Title": row["title"],
@@ -68,23 +101,40 @@ def recommend_internships(user_skills, user_location, top_n=3):
             "Stipend": row["stipend"],
             "Match Score": score
         })
+    return sorted(recommendations, key=lambda x: x["Match Score"], reverse=True)[:top_n]
 
-    # Sort by match score
-    recommendations = sorted(recommendations, key=lambda x: x["Match Score"], reverse=True)
+# ---------- UI Options ----------
+mode = st.radio("Choose Input Method:", ["📄 Upload Resume", "✍️ Manual Entry"])
 
-    return recommendations[:top_n]
+resume_data = {}
 
+if mode == "📄 Upload Resume":
+    uploaded = st.file_uploader("Upload your Resume (PDF)", type=["pdf"])
+    if uploaded:
+        text = extract_text_from_pdf(uploaded.read())
+        st.success("✅ Resume uploaded successfully")
+        if text.strip():
+            with st.spinner("Extracting details with AI..."):
+                resume_data = call_llm_extract_resume(text)
+            st.json(resume_data)
+        else:
+            st.warning("Could not extract text from PDF.")
 
-# ---------- Button Action ----------
+# Manual input (fallback or user choice)
+st.subheader("Enter / Confirm Your Details")
+
+name = st.text_input("Name", value=resume_data.get("Name", "") if resume_data else "")
+education = st.text_input("Education", value=resume_data.get("Education", "") if resume_data else "")
+skills = st.text_area("Skills (comma-separated)", value=", ".join(resume_data.get("Skills", [])) if resume_data else "")
+location_pref = st.text_input("Preferred Location", value=resume_data.get("Location", "") if resume_data else "")
+
+# ---------- Recommend ----------
 if st.button("Find My Internships"):
-    if skills.strip() == "":
-        st.warning("⚠️ Please enter at least your skills to get recommendations.")
+    if not skills.strip():
+        st.warning("⚠️ Please enter your skills.")
     else:
         results = recommend_internships(skills, location_pref)
-
         st.write(f"### 🔍 Top Internship Recommendations for {name if name else 'You'}:")
-
-        # Show results as cards
         for r in results:
             st.markdown(f"""
             ---
