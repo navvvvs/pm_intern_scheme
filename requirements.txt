@@ -6,4 +6,5 @@ PyPDF2
 pdfplumber
 numpy
 spacy
-docx
+python-docx
+
