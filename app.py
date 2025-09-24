@@ -1,13 +1,10 @@
 # app.py
 import os
-import json
 import re
 import streamlit as st
 import pandas as pd
 import pdfplumber
 from io import BytesIO
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from docx import Document
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -16,63 +13,77 @@ import spacy
 # ---------- Load NLP ----------
 nlp = spacy.load("en_core_web_sm")
 
-# ---------- Configure Gemini ----------
-# genai.configure(api_key=os.getenv("AIzaSyCQ8h1NWy67h_c3af2kdovQ7JR-2osM2VA", ""))
-# MODEL = genai.GenerativeModel("gemini-pro")
-
 # ---------- Load Data ----------
 internships = pd.read_csv("data/internships.csv")
 
-st.set_page_config(page_title="AI Internship Recommender", layout="centered")
-st.title("AI-Based Internship Recommendation System")
-st.write("Prototype for Smart India Hackathon 2025")
+# ---------- Streamlit Config ----------
+st.set_page_config(
+    page_title="AI Internship Recommender",
+    page_icon="💼",
+    layout="wide"
+)
 
-# ---------- Helpers ----------
-# def extract_text_from_pdf(file_bytes: bytes) -> str:
-#     text = ""
-#     with pdfplumber.open(BytesIO(file_bytes)) as pdf:
-#         for page in pdf.pages:
-#             page_text = page.extract_text()
-#             if page_text:
-#                 text += page_text + "\n"
-#     return text
+# ---------- Custom Styling ----------
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #FFF1E0; /* light peach */
+    }
 
-# def safe_parse_json(text: str):
-#     try:
-#         return json.loads(text)
-#     except:
-#         start = text.find("{")
-#         end = text.rfind("}")
-#         if start != -1 and end != -1:
-#             try:
-#                 return json.loads(text[start:end+1])
-#             except:
-#                 pass
-#     return None
+    .main {
+        background-color: #fdfdfd;
+        padding: 2rem;
+    }
+    .title {
+        text-align: center;
+        font-size: 3.8rem;
+        font-weight: 900;
+        color: #5a1e1e;
+        margin-bottom: 0.3rem;
+    }
+    .subtitle {
+        text-align: center;
+        font-size: 1.8rem;
+        font-weight: 600;
+        color: #7a2d2d;
+        margin-bottom: 2rem;
+    }
+    
+    .stRadio > label {
+        font-weight: 600;
+        color: #5a1e1e;
+    }
+    .upload-btn > button {
+        background-color: #7a2d2d;
+        color: white;
+        font-weight: 600;
+        padding: 0.8rem 1.5rem;
+        border-radius: 8px;
+        border: none;
+        font-size: 1.05rem;
+    }
+    .upload-btn > button:hover {
+        background-color: #5a1e1e;
+        transform: scale(1.02);
+    }
+    .recommend-card {
+        background: white;
+        padding: 1rem 1.5rem;
+        border-radius: 14px;
+        box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+        margin-bottom: 1rem;
+        border-left: 6px solid #7a2d2d;
+    }
+    footer {
+        text-align: center;
+        padding: 1rem;
+        color: #6b7280;
+        margin-top: 2rem;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# def call_llm_extract_resume(resume_text: str) -> dict:
-#     prompt = f"""
-#     Extract the following from resume text and return JSON only:
-#     - Name
-#     - Age
-#     - Education
-#     - Skills (as a list)
-#     - Location
-
-#     Resume Text:
-#     {resume_text}
-#     """
-#     try:
-#         response = MODEL.generate_content(prompt)
-#         parsed = safe_parse_json(response.text)
-#         if parsed:
-#             return parsed
-#     except:
-#         pass
-#     return {"Name": None, "Age": None, "Education": None, "Skills": [], "Location": None}
-
-
-# ---------- CV Parsing Functions ----------
+# ---------- Helper Functions ----------
 def extract_text(file):
     text = ""
     if file.name.endswith(".pdf"):
@@ -90,19 +101,14 @@ def extract_text(file):
 
 def parse_cv(file):
     text = extract_text(file).strip()
-
-    # Regex
     email = re.findall(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", text)
     phone = re.findall(r"\+?\d[\d\s-]{8,}\d", text)
-
-    # NLP
     doc = nlp(text)
     names = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
 
     education_keywords = ["B.Tech", "BE", "M.Tech", "B.Sc", "M.Sc", "BCA", "MCA", "Diploma"]
     education_found = [word for word in education_keywords if word.lower() in text.lower()]
 
-    # Skills from dataset
     all_skills = set()
     for skills in internships["skills_required"].dropna():
         for skill in skills.split(";"):
@@ -159,53 +165,68 @@ def recommend_internships(skills, location_pref, top_n=3):
         })
     return sorted(recommendations, key=lambda x: x["Match Score"], reverse=True)[:top_n]
 
-# ---------- Streamlit UI ----------
-mode = st.radio("Choose Input Method:", ["📄 Upload Resume", "✍️ Manual Entry"])
+# ---------- UI ----------
+st.markdown('<div class="title">AI BASED INTERNSHIP RECOMMENDATION SYSTEM</div>', unsafe_allow_html=True)
+st.markdown('<div class="subtitle">For PM Internship Scheme</div>', unsafe_allow_html=True)
 
-# Initialize variables to avoid NameError
-name = ""
-education = ""
-skills = ""
-location_pref = ""
+with st.container():
+    st.markdown('<div class="section-box">', unsafe_allow_html=True)
 
-resume_data = {}
+    st.write("Upload your resume or fill in details manually to find the best internship matches for you.")
+    st.write("#### Choose Input Method:")
 
-if mode == "📄 Upload Resume":
-    uploaded_file = st.file_uploader("Upload CV (PDF or DOCX)", type=["pdf", "docx"])
-    if uploaded_file:
-        st.success("✅ File uploaded successfully")
-        parsed_info = parse_cv(uploaded_file)
-        st.subheader("Extracted Information")
-        st.json(parsed_info)
-        resume_data = parsed_info
+    mode = st.radio("", ["Upload Resume", "Manual Entry"], horizontal=True)
 
-        # Assign parsed values to variables
-        name = parsed_info.get("name", "")
-        education = ", ".join(parsed_info.get("education", []))
-        skills = ", ".join(parsed_info.get("skills", []))
-        location_pref = parsed_info.get("location", "")
+    resume_data = {}
+    name = education = skills = location_pref = ""
 
-else:  # Manual entry
-    st.subheader("Enter / Confirm Your Details")
-    name = st.text_input("Name", value=resume_data.get("name", "") if resume_data else "")
-    education = st.text_input("Education", value=", ".join(resume_data.get("education", [])) if resume_data else "")
-    skills = st.text_area("Skills (comma-separated)", value=", ".join(resume_data.get("skills", [])) if resume_data else "")
-    location_pref = st.text_input("Preferred Location", value=resume_data.get("location", "") if resume_data else "")
-
-# ---------- Recommend ----------
-if st.button("Find My Internships"):
-    if not skills.strip():
-        st.warning("⚠️ Please enter your skills.")
+    if mode == "Upload Resume":
+        uploaded_file = st.file_uploader("Upload CV (PDF or DOCX)", type=["pdf", "docx"], label_visibility="collapsed")
+        if uploaded_file:
+            st.success("File uploaded successfully")
+            parsed_info = parse_cv(uploaded_file)
+            st.subheader("➤ Extracted Information")
+            st.json(parsed_info)
+            resume_data = parsed_info
+            name = parsed_info.get("name", "")
+            education = ", ".join(parsed_info.get("education", []))
+            skills = ", ".join(parsed_info.get("skills", []))
+            location_pref = parsed_info.get("location", "")
     else:
-        results = recommend_internships(skills, location_pref)
-        st.write(f"### 🔍 Top Internship Recommendations for {name if name else 'You'}:")
-        for r in results:
-            st.markdown(f"""
-            ---
-            **🏢 Company:** {r['Company']}  
-            **💼 Title:** {r['Title']}  
-            **📍 Location:** {r['Location']}  
-            **⏳ Duration:** {r['Duration']}  
-            **💰 Stipend:** {r['Stipend']}  
-            **✅ Match Score:** {r['Match Score']}%
-            """)
+        st.subheader("Enter / Confirm Your Details")
+        col1, col2 = st.columns(2)
+        with col1:
+            name = st.text_input("Name", value=resume_data.get("name", ""))
+            education = st.text_input("Education", value=", ".join(resume_data.get("education", [])) if resume_data else "")
+        with col2:
+            skills = st.text_area("Skills (comma-separated)", value=", ".join(resume_data.get("skills", [])) if resume_data else "")
+            location_pref = st.text_input("Preferred Location", value=resume_data.get("location", ""))
+
+    # Recommend Button
+    st.markdown('<div class="upload-btn">', unsafe_allow_html=True)
+    find_button = st.button("Find My Internships")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # Recommendations
+    if find_button:
+        if not skills.strip():
+            st.warning("Please enter your skills.")
+        else:
+            results = recommend_internships(skills, location_pref)
+            st.markdown(f"### Top Internship Recommendations for **{name if name else 'You'}**")
+            for r in results:
+                st.markdown(f"""
+                <div class="recommend-card">
+                    <b>➤ Company:</b> {r['Company']} <br>
+                    <b>➤ Title:</b> {r['Title']} <br>
+                    <b>➤ Location:</b> {r['Location']} <br>
+                    <b>➤ Duration:</b> {r['Duration']} <br>
+                    <b>➤ Stipend:</b> {r['Stipend']} <br>
+                    <b>✅ Match Score:</b> {r['Match Score']}%
+                </div>
+                """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)  # close section box
+
+# ---------- Footer ----------
+st.markdown("<footer> Built for Smart India Hackathon 2025 | AI Internship Recommender</footer>", unsafe_allow_html=True)
